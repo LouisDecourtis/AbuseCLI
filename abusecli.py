@@ -270,6 +270,18 @@ Examples:
         help="Show detailed output, strongly recommended for debugging.",
     )
 
+    # QUOTA command
+    quota_parser = subparsers.add_parser(
+        "quota",
+        help="Display current API usage and remaining quota",
+    )
+    quota_parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show detailed output.",
+    )
+
     return parser
 
 
@@ -399,6 +411,123 @@ def display_results(df):
             "\n".join(summary_lines), title="Summary", border_style="cyan", expand=False
         )
     )
+    console.print()
+
+
+def fetch_quota(api_key):
+    """Fetch API quota by making a lightweight check and reading rate limit headers"""
+    headers = {"Key": api_key, "Accept": "application/json"}
+    params = {"ipAddress": "127.0.0.1", "maxAgeInDays": 1}
+
+    try:
+        response = requests.get(API_URL, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+
+        return {
+            "limit": int(response.headers.get("X-RateLimit-Limit", 0)),
+            "remaining": int(response.headers.get("X-RateLimit-Remaining", 0)),
+            "reset": int(response.headers.get("X-RateLimit-Reset", 0)),
+        }
+    except requests.exceptions.RequestException as e:
+        print_error(f"Failed to fetch quota: {e}")
+        return None
+
+
+def display_quota(quota):
+    """Display API quota with a rich panel and progress bars"""
+    limit = quota["limit"]
+    remaining = quota["remaining"]
+    used = limit - remaining
+    reset_seconds = quota["reset"]
+
+    # Usage percentage
+    usage_pct = round(used / limit * 100) if limit > 0 else 0
+    remaining_pct = 100 - usage_pct
+
+    # Color based on remaining quota
+    if remaining_pct > 50:
+        bar_color = "green"
+        status_color = "green"
+        status_text = "Healthy"
+    elif remaining_pct > 20:
+        bar_color = "yellow"
+        status_color = "yellow"
+        status_text = "Moderate"
+    elif remaining_pct > 5:
+        bar_color = "dark_orange"
+        status_color = "dark_orange"
+        status_text = "Low"
+    else:
+        bar_color = "red"
+        status_color = "red"
+        status_text = "Critical"
+
+    # Build usage bar
+    bar_width = 30
+    filled = round(used / limit * bar_width) if limit > 0 else 0
+    empty = bar_width - filled
+    usage_bar = Text()
+    usage_bar.append("█" * filled, style=bar_color)
+    usage_bar.append("░" * empty, style="dim")
+
+    # Build remaining bar
+    rem_filled = bar_width - filled
+    rem_empty = bar_width - rem_filled
+    remaining_bar = Text()
+    remaining_bar.append("█" * rem_filled, style="green")
+    remaining_bar.append("░" * rem_empty, style="dim")
+
+    # Reset time
+    hours = reset_seconds // 3600
+    minutes = (reset_seconds % 3600) // 60
+
+    # Build table
+    table = Table(
+        title="API Quota",
+        show_lines=True,
+        header_style="bold cyan",
+        border_style="dim",
+        expand=False,
+    )
+
+    table.add_column("Metric", style="bold white", min_width=15)
+    table.add_column("Value", justify="right", min_width=10)
+    table.add_column("Visual", min_width=35)
+
+    table.add_row(
+        "Status",
+        Text(status_text, style=f"bold {status_color}"),
+        Text(f"● {status_text}", style=f"bold {status_color}"),
+    )
+    table.add_row(
+        "Daily Limit", str(limit), Text(f"max {limit} requests/day", style="dim")
+    )
+    table.add_row(
+        "Used",
+        Text(f"{used}", style=bar_color),
+        usage_bar,
+    )
+    table.add_row(
+        "Remaining",
+        Text(
+            f"{remaining}",
+            style="bold green" if remaining_pct > 20 else f"bold {bar_color}",
+        ),
+        remaining_bar,
+    )
+    table.add_row(
+        "Usage",
+        Text(f"{usage_pct}%", style=f"bold {bar_color}"),
+        Text(f"{used}/{limit} requests used today", style="dim"),
+    )
+    table.add_row(
+        "Resets in",
+        f"{hours}h {minutes}m",
+        Text(f"{reset_seconds}s until quota reset", style="dim"),
+    )
+
+    console.print()
+    console.print(table)
     console.print()
 
 
@@ -1288,7 +1417,7 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command in ("check", "analyze"):
+    if args.command in ("check", "analyze", "quota"):
         try:
             api_key = load_api_key(args=args)
         except KeyboardInterrupt:
@@ -1298,13 +1427,18 @@ def main():
             print_error(f"Error occured while loading API key: {e}")
             return
 
-        if args.command == "check":
+        if args.command == "quota":
+            quota = fetch_quota(api_key)
+            if quota:
+                display_quota(quota)
+        elif args.command == "check":
             ip_df = process_ip_addresses(args=args, api_key=api_key)
+            if ip_df is not None and not ip_df.empty:
+                display_results(ip_df)
         else:
             ip_df = process_analyze(args=args, api_key=api_key)
-
-        if ip_df is not None and not ip_df.empty:
-            display_results(ip_df)
+            if ip_df is not None and not ip_df.empty:
+                display_results(ip_df)
 
     elif args.command == "load":
         ip_df = process_loaded_data(args)
