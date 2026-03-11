@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import re
 import sys
 import json
 import getpass
@@ -55,6 +56,9 @@ def create_parser():
         epilog="""
 Examples:
   abusecli.py check --ips 1.1.1.1 8.8.8.8
+  abusecli.py check --file ips.txt
+  cat ips.txt | abusecli.py check --ips -
+  abusecli.py analyze /var/log/auth.log
   """,
     )
 
@@ -73,12 +77,17 @@ Examples:
     check_parser = subparsers.add_parser(
         "check", help="Check connectivity to IP addresses"
     )
-    check_parser.add_argument(
+    check_input = check_parser.add_mutually_exclusive_group(required=True)
+    check_input.add_argument(
         "--ips",
         nargs="+",
-        required=True,
         metavar="IP",
-        help="List of IP addresses to check",
+        help="List of IP addresses to check (use '-' to read from stdin)",
+    )
+    check_input.add_argument(
+        "--file",
+        metavar="FILE",
+        help="Read IP addresses from a file (one per line)",
     )
     check_parser.add_argument(
         "--risk-level",
@@ -184,6 +193,53 @@ Examples:
         help="Export results to file(s). Formats: csv, json, excel, html, parquet. Can specify multiple formats."
     )
     load_parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Show detailed output, strongly recommended for debugging."
+    )
+
+    # ANALYZE command
+    analyze_parser = subparsers.add_parser(
+        "analyze", help="Extract and analyze IP addresses from log files"
+    )
+    analyze_parser.add_argument(
+        "log_file",
+        metavar="LOG_FILE",
+        help="Path to the log file to analyze (auth.log, access.log, syslog, etc.)",
+    )
+    analyze_parser.add_argument(
+        "--risk-level", "-r",
+        choices=["critical", "high", "medium", "low"],
+        help="Filter by risk level (critical, high, medium, low)",
+    )
+    analyze_parser.add_argument(
+        "--score", "-s",
+        type=int,
+        help="Only keep IPs with a score above this value (between 0 and 100)",
+    )
+    analyze_parser.add_argument(
+        "--country-code",
+        type=str,
+        help="Only keep IPs with the corresponding country code",
+    )
+    analyze_parser.add_argument(
+        "--is-tor", action="store_true", help="Only keep TOR IP addresses"
+    )
+    analyze_parser.add_argument(
+        "--is-not-tor", action="store_true", help="Only keep non-TOR IP addresses"
+    )
+    analyze_parser.add_argument(
+        "--remove-private", action="store_true", help="Only keep public IP addresses"
+    )
+    analyze_parser.add_argument(
+        "--remove-whitelisted", action="store_true", help="Only keep non-whitelisted IP addresses"
+    )
+    analyze_parser.add_argument(
+        "--export", "-e",
+        nargs="+",
+        choices=["csv", "json", "excel", "html", "parquet"],
+        metavar="FORMAT",
+        help="Export results to file(s). Formats: csv, json, excel, html, parquet.",
+    )
+    analyze_parser.add_argument(
         "--verbose", "-v", action="store_true", help="Show detailed output, strongly recommended for debugging."
     )
 
@@ -839,16 +895,102 @@ def validate_loaded_dataframe(df, verbose: bool = False):
     return True
 
 ###########################################################################
+## IP EXTRACTION ##########################################################
+###########################################################################
+
+# Regex matching IPv4 and IPv6 addresses
+IP_REGEX = re.compile(
+    r'(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(?![\d.])'
+    r'|(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}'
+    r'|(?:[0-9a-fA-F]{1,4}:){1,7}:'
+    r'|::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}'
+)
+
+# Private/loopback ranges to exclude from log analysis
+PRIVATE_IP_PREFIXES = ('10.', '172.16.', '172.17.', '172.18.', '172.19.',
+                       '172.20.', '172.21.', '172.22.', '172.23.', '172.24.',
+                       '172.25.', '172.26.', '172.27.', '172.28.', '172.29.',
+                       '172.30.', '172.31.', '192.168.', '127.', '0.', '169.254.')
+
+
+def extract_ips_from_text(text):
+    """Extract unique IP addresses from raw text"""
+    return list(set(IP_REGEX.findall(text)))
+
+
+def extract_ips_from_file(file_path, skip_private=True, verbose=False):
+    """Extract unique IP addresses from a log file"""
+    if not os.path.exists(file_path):
+        print_error(f"File not found: {file_path}")
+        return []
+
+    try:
+        with open(file_path, "r", errors="ignore") as f:
+            content = f.read()
+    except Exception as e:
+        print_error(f"Failed to read file {file_path}: {e}")
+        return []
+
+    all_ips = extract_ips_from_text(content)
+
+    if skip_private:
+        public_ips = [ip for ip in all_ips if not ip.startswith(PRIVATE_IP_PREFIXES)]
+    else:
+        public_ips = all_ips
+
+    if verbose:
+        print_info(f"Total IPs found in file: {len(all_ips)}")
+        if skip_private:
+            print_info(f"After removing private/loopback: {len(public_ips)}")
+        print_info(f"Unique public IPs to check: {len(public_ips)}")
+
+    return public_ips
+
+
+def resolve_ip_list(args):
+    """Resolve the final list of IPs from --ips (including stdin via '-') or --file"""
+    if args.file:
+        file_path = args.file
+        if not os.path.exists(file_path):
+            print_error(f"File not found: {file_path}")
+            return []
+        with open(file_path, "r") as f:
+            ips = [line.strip() for line in f if line.strip()]
+        if args.verbose:
+            print_info(f"Loaded {len(ips)} IPs from {file_path}")
+        return ips
+
+    if args.ips:
+        if args.ips == ["-"]:
+            if sys.stdin.isatty():
+                print_error("No input from stdin. Pipe data or use --file/--ips.")
+                return []
+            raw = sys.stdin.read()
+            ips = [line.strip() for line in raw.splitlines() if line.strip()]
+            if args.verbose:
+                print_info(f"Read {len(ips)} IPs from stdin")
+            return ips
+        return args.ips
+
+    return []
+
+
+###########################################################################
 ## PROCESSING METHODS #####################################################
 ###########################################################################
 
 
 def process_ip_addresses(args, api_key):
+    ip_list = resolve_ip_list(args)
+    if not ip_list:
+        print_error("No IP addresses provided")
+        return None
+
     ip_array = []
     success_count = 0
     error_count = 0
 
-    with tqdm(args.ips, desc="Analyzing IPs", unit="IP", colour="green") as pbar:
+    with tqdm(ip_list, desc="Analyzing IPs", unit="IP", colour="green") as pbar:
         for ip in pbar:
             try:
                 pbar.set_description(f"Checking {ip}")
@@ -1016,6 +1158,24 @@ def process_loaded_data(args):
     
     return display_df
 
+def process_analyze(args, api_key):
+    """
+    Extract IPs from a log file, check them via the API, and display results.
+    """
+    ips = extract_ips_from_file(args.log_file, skip_private=True, verbose=args.verbose)
+
+    if not ips:
+        print_error("No public IP addresses found in the log file")
+        return None
+
+    print_success(f"Found {len(ips)} unique public IPs in {args.log_file}")
+
+    # Reuse process_ip_addresses by injecting the IP list
+    args.ips = ips
+    args.file = None
+    return process_ip_addresses(args, api_key)
+
+
 ###########################################################################
 ## MAIN ###################################################################
 ###########################################################################
@@ -1031,7 +1191,7 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "check":
+    if args.command in ("check", "analyze"):
         try:
             api_key = load_api_key(args=args)
         except KeyboardInterrupt:
@@ -1041,7 +1201,11 @@ def main():
             print_error(f"Error occured while loading API key: {e}")
             return
 
-        ip_df = process_ip_addresses(args=args, api_key=api_key)
+        if args.command == "check":
+            ip_df = process_ip_addresses(args=args, api_key=api_key)
+        else:
+            ip_df = process_analyze(args=args, api_key=api_key)
+
         if ip_df is not None and not ip_df.empty:
             display_results(ip_df)
 
