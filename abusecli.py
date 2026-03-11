@@ -1016,7 +1016,7 @@ def extract_ips_from_file(file_path, skip_private=True, verbose=False):
 
 
 def resolve_ip_list(args):
-    """Resolve the final list of IPs from --ips (including stdin via '-') or --file"""
+    """Resolve the final list of unique IPs from --ips (including stdin via '-') or --file"""
     if args.file:
         file_path = args.file
         if not os.path.exists(file_path):
@@ -1024,23 +1024,31 @@ def resolve_ip_list(args):
             return []
         with open(file_path, "r") as f:
             ips = [line.strip() for line in f if line.strip()]
-        if args.verbose:
-            print_info(f"Loaded {len(ips)} IPs from {file_path}")
-        return ips
-
-    if args.ips:
+    elif args.ips:
         if args.ips == ["-"]:
             if sys.stdin.isatty():
                 print_error("No input from stdin. Pipe data or use --file/--ips.")
                 return []
             raw = sys.stdin.read()
             ips = [line.strip() for line in raw.splitlines() if line.strip()]
-            if args.verbose:
-                print_info(f"Read {len(ips)} IPs from stdin")
-            return ips
-        return args.ips
+        else:
+            ips = args.ips
+    else:
+        return []
 
-    return []
+    # Deduplicate while preserving order
+    unique_ips = list(dict.fromkeys(ips))
+
+    if len(unique_ips) < len(ips) and args.verbose:
+        print_info(
+            f"Removed {len(ips) - len(unique_ips)} duplicate IPs "
+            f"({len(ips)} -> {len(unique_ips)})"
+        )
+
+    if args.verbose:
+        print_info(f"Loaded {len(unique_ips)} unique IPs")
+
+    return unique_ips
 
 
 ###########################################################################
