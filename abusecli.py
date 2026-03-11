@@ -500,7 +500,7 @@ def check_ip_abuse(ip_address, api_key, verbose: bool = False):
     params = {"ipAddress": ip_address, "maxAgeInDays": 90, "verbose": ""}
 
     try:
-        response = requests.get(API_URL, headers=headers, params=params)
+        response = requests.get(API_URL, headers=headers, params=params, timeout=30)
         return handle_api_response(
             response=response,
             success_message=f"{ip_address} successfully verfifed on AbuseIP",
@@ -616,7 +616,7 @@ def filter_tor_addresses(df, is_tor, is_not_tor, verbose: bool = False):
     if is_tor:
         if verbose:
             print_info("Applying TOR filter: keeping only TOR addresses")
-        filtered_df = df[df["isTor"] == True]
+        filtered_df = df[df["isTor"].eq(True)]
         if filtered_df.empty:
             print_warning("No TOR IP addresses found")
         elif verbose:
@@ -626,7 +626,7 @@ def filter_tor_addresses(df, is_tor, is_not_tor, verbose: bool = False):
     if is_not_tor:
         if verbose:
             print_info("Applying TOR filter: removing TOR addresses")
-        filtered_df = df[df["isTor"] == False]
+        filtered_df = df[df["isTor"].eq(False)]
         if filtered_df.empty:
             print_warning("No non-TOR IP addresses found")
         elif verbose:
@@ -648,7 +648,7 @@ def filter_remove_private(df, remove_private, verbose: bool = False):
     if verbose:
         print_info("Applying private IP filter: keeping only public addresses")
 
-    filtered_df = df[df["isPublic"] == True]
+    filtered_df = df[df["isPublic"].eq(True)]
 
     if filtered_df.empty:
         print_warning("No public IP addresses found")
@@ -668,7 +668,7 @@ def filter_remove_whitelisted(df, remove_whitelisted, verbose: bool = False):
     if verbose:
         print_info("Applying whitelist filter: removing whitelisted addresses")
 
-    filtered_df = df[df["isWhitelisted"] == False]
+    filtered_df = df[df["isWhitelisted"].eq(False)]
 
     if filtered_df.empty:
         print_warning("No non-whitelisted IP addresses found")

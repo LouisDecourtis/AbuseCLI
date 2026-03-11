@@ -139,6 +139,56 @@ Multiple formats can be specified at once: `--export csv json excel`
 ╰─────────────────────────────────╯
 ```
 
+## DevSecOps
+
+This project includes a full CI/CD pipeline and security tooling.
+
+### CI/CD Pipeline (GitHub Actions)
+
+The pipeline runs on every push and PR to `main`:
+
+| Stage | Tool | Description |
+|-------|------|-------------|
+| Lint & Format | [Ruff](https://github.com/astral-sh/ruff) | Python linting and code formatting |
+| SAST | [Bandit](https://github.com/PyCQA/bandit) | Static Application Security Testing |
+| Dependency Check | [Safety](https://github.com/pyupio/safety) | Known vulnerability scanning on dependencies |
+| Tests | [Pytest](https://pytest.org/) | Unit tests with coverage (Python 3.10, 3.11, 3.12) |
+| Docker | Docker Build | Validates the container image builds and runs |
+
+### Pre-commit Hooks
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Hooks run automatically before each commit:
+- **Ruff** lint + format
+- **Bandit** security scan
+- **Trailing whitespace** / **end-of-file** fixes
+- **Private key detection**
+- **Large file check** (max 500KB)
+
+### Docker
+
+```bash
+# Build
+docker build -t abusecli .
+
+# Run
+docker run --rm -e ABUSEIPDB_API_KEY=your_key abusecli check --ips 8.8.8.8
+
+# Analyze a log file (mount it as volume)
+docker run --rm -e ABUSEIPDB_API_KEY=your_key -v /var/log:/logs:ro abusecli analyze /logs/auth.log
+```
+
+### Running Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v --cov=. --cov-report=term-missing
+```
+
 ## License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
