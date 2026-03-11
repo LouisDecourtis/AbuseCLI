@@ -21,13 +21,23 @@ from rich.text import Text
 console = Console()
 
 
-__version__ = 1.0
+__version__ = "1.0.0"
 
 ###########################################################################
 ## CONSTANTS ##############################################################
 ###########################################################################
 
 API_URL = "https://api.abuseipdb.com/api/v2/check"
+
+BANNER = """
+[bold red] █████╗ ██████╗ ██╗   ██╗███████╗███████╗ ██████╗██╗     ██╗
+██╔══██╗██╔══██╗██║   ██║██╔════╝██╔════╝██╔════╝██║     ██║
+███████║██████╔╝██║   ██║███████╗█████╗  ██║     ██║     ██║
+██╔══██║██╔══██╗██║   ██║╚════██║██╔══╝  ██║     ██║     ██║
+██║  ██║██████╔╝╚██████╔╝███████║███████╗╚██████╗███████╗██║
+╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚══════╝╚══════╝ ╚═════╝╚══════╝╚═╝[/bold red]
+[dim]v{version} — AbuseIPDB CLI Tool[/dim]
+"""
 ENV_FILE = ".env"
 
 # Risk level constants
@@ -145,31 +155,34 @@ Examples:
         "load", help="Load IP data from file and apply filters"
     )
     load_parser.add_argument(
-        "--source", "-s",
+        "--source",
+        "-s",
         required=True,
         metavar="FILE",
-        help="Source file to load (CSV, JSON, Excel, Parquet)"
+        help="Source file to load (CSV, JSON, Excel, Parquet)",
     )
     load_parser.add_argument(
-        "--format", "-f",
+        "--format",
+        "-f",
         choices=["csv", "json", "excel", "parquet", "auto"],
         default="auto",
-        help="File format (default: auto-detect from extension)"
+        help="File format (default: auto-detect from extension)",
     )
 
     # Add all the same filtering arguments as check command
     load_parser.add_argument(
-        "--risk-level", "-r", 
+        "--risk-level",
+        "-r",
         choices=["critical", "high", "medium", "low"],
-        help="Filter by risk level (critical, high, medium, low)"
+        help="Filter by risk level (critical, high, medium, low)",
     )
     load_parser.add_argument(
-        "--score", 
+        "--score",
         type=int,
         help="Only keep IPs with a score above this value (between 0 and 100)",
     )
     load_parser.add_argument(
-        "--country-code", 
+        "--country-code",
         type=str,
         help="Only keep IPs with the corresponding country code",
     )
@@ -183,17 +196,23 @@ Examples:
         "--remove-private", action="store_true", help="Only keep public IP addresses"
     )
     load_parser.add_argument(
-        "--remove-whitelisted", action="store_true", help="Only keep non-whitelisted IP addresses"
+        "--remove-whitelisted",
+        action="store_true",
+        help="Only keep non-whitelisted IP addresses",
     )
     load_parser.add_argument(
-        "--export", "-e",
+        "--export",
+        "-e",
         nargs="+",
         choices=["csv", "json", "excel", "html", "parquet"],
         metavar="FORMAT",
-        help="Export results to file(s). Formats: csv, json, excel, html, parquet. Can specify multiple formats."
+        help="Export results to file(s). Formats: csv, json, excel, html, parquet. Can specify multiple formats.",
     )
     load_parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Show detailed output, strongly recommended for debugging."
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show detailed output, strongly recommended for debugging.",
     )
 
     # ANALYZE command
@@ -206,12 +225,14 @@ Examples:
         help="Path to the log file to analyze (auth.log, access.log, syslog, etc.)",
     )
     analyze_parser.add_argument(
-        "--risk-level", "-r",
+        "--risk-level",
+        "-r",
         choices=["critical", "high", "medium", "low"],
         help="Filter by risk level (critical, high, medium, low)",
     )
     analyze_parser.add_argument(
-        "--score", "-s",
+        "--score",
+        "-s",
         type=int,
         help="Only keep IPs with a score above this value (between 0 and 100)",
     )
@@ -230,17 +251,23 @@ Examples:
         "--remove-private", action="store_true", help="Only keep public IP addresses"
     )
     analyze_parser.add_argument(
-        "--remove-whitelisted", action="store_true", help="Only keep non-whitelisted IP addresses"
+        "--remove-whitelisted",
+        action="store_true",
+        help="Only keep non-whitelisted IP addresses",
     )
     analyze_parser.add_argument(
-        "--export", "-e",
+        "--export",
+        "-e",
         nargs="+",
         choices=["csv", "json", "excel", "html", "parquet"],
         metavar="FORMAT",
         help="Export results to file(s). Formats: csv, json, excel, html, parquet.",
     )
     analyze_parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Show detailed output, strongly recommended for debugging."
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show detailed output, strongly recommended for debugging.",
     )
 
     return parser
@@ -249,6 +276,11 @@ Examples:
 ###########################################################################
 ## DISPLAY ################################################################
 ###########################################################################
+
+
+def print_banner():
+    """Print the AbuseCLI ASCII banner"""
+    console.print(BANNER.format(version=__version__))
 
 
 def print_success(message):
@@ -337,7 +369,9 @@ def display_results(df):
 
     # Summary panel
     total = len(df)
-    risk_counts = df["risk_level"].value_counts() if "risk_level" in df.columns else pd.Series()
+    risk_counts = (
+        df["risk_level"].value_counts() if "risk_level" in df.columns else pd.Series()
+    )
 
     summary_lines = [f"[bold]Total IPs:[/bold]  {total}"]
 
@@ -346,7 +380,9 @@ def display_results(df):
         color = RISK_COLORS.get(level, "white")
         bar_width = round(count / total * 20) if total > 0 else 0
         bar = "█" * bar_width + "░" * (20 - bar_width)
-        summary_lines.append(f"[{color}]{level.capitalize():10s}[/{color}]  {count:>3d}  [{color}]{bar}[/{color}]")
+        summary_lines.append(
+            f"[{color}]{level.capitalize():10s}[/{color}]  {count:>3d}  [{color}]{bar}[/{color}]"
+        )
 
     if "countryCode" in df.columns:
         unique_countries = df["countryCode"].nunique()
@@ -358,7 +394,11 @@ def display_results(df):
             summary_lines.append(f"[bold red]TOR nodes:[/bold red] {tor_count}")
 
     console.print()
-    console.print(Panel("\n".join(summary_lines), title="Summary", border_style="cyan", expand=False))
+    console.print(
+        Panel(
+            "\n".join(summary_lines), title="Summary", border_style="cyan", expand=False
+        )
+    )
     console.print()
 
 
@@ -393,7 +433,7 @@ def handle_api_response(
         try:
             error_details = response.json()
             print_error(f"API Error Details: {json.dumps(error_details, indent=2)}")
-        except requests.exceptions.HTTPError as http_err:
+        except (ValueError, json.JSONDecodeError):
             print_error(f"Response content: {response.text}")
         return None
     except requests.exceptions.RequestException as err:
@@ -503,7 +543,7 @@ def check_ip_abuse(ip_address, api_key, verbose: bool = False):
         response = requests.get(API_URL, headers=headers, params=params, timeout=30)
         return handle_api_response(
             response=response,
-            success_message=f"{ip_address} successfully verfifed on AbuseIP",
+            success_message=f"{ip_address} successfully verified on AbuseIPDB",
             verbose=verbose,
         )
     except requests.exceptions.RequestException as e:
@@ -792,107 +832,116 @@ def export_dataframe(df, formats, base_filename="ip_analysis", verbose: bool = F
 
     return exported_files
 
+
 def load_dataframe_from_file(file_path, file_format="auto", verbose: bool = False):
     """
     Load DataFrame from various file formats
-    
+
     Args:
         file_path: Path to the source file
         file_format: Format of the file ('csv', 'json', 'excel', 'parquet', 'auto')
         verbose: Whether to show detailed output
-    
+
     Returns:
         pandas.DataFrame or None if loading failed
     """
     if not os.path.exists(file_path):
         print_error(f"File not found: {file_path}")
         return None
-    
+
     # Auto-detect format from file extension
     if file_format == "auto":
         extension = Path(file_path).suffix.lower()
         format_mapping = {
-            '.csv': 'csv',
-            '.json': 'json',
-            '.xlsx': 'excel',
-            '.xls': 'excel',
-            '.parquet': 'parquet',
-            '.pq': 'parquet'
+            ".csv": "csv",
+            ".json": "json",
+            ".xlsx": "excel",
+            ".xls": "excel",
+            ".parquet": "parquet",
+            ".pq": "parquet",
         }
         file_format = format_mapping.get(extension)
-        
+
         if not file_format:
             print_error(f"Cannot auto-detect format for file: {file_path}")
             print_info("Supported extensions: .csv, .json, .xlsx, .xls, .parquet, .pq")
             return None
-        
+
         if verbose:
             print_info(f"Auto-detected format: {file_format}")
-    
+
     try:
         if verbose:
             print_info(f"Loading data from {file_path} as {file_format.upper()}")
-        
+
         if file_format == "csv":
             df = pd.read_csv(file_path)
-            
+
         elif file_format == "json":
             df = pd.read_json(file_path)
-            
+
         elif file_format == "excel":
             df = pd.read_excel(file_path)
-            
+
         elif file_format == "parquet":
             df = pd.read_parquet(file_path)
-            
+
         else:
             print_error(f"Unsupported file format: {file_format}")
             return None
-        
+
         if df.empty:
             print_warning("Loaded file is empty")
             return None
-        
+
         if verbose:
             print_success(f"Successfully loaded {len(df)} records from {file_path}")
             print_info(f"Columns: {', '.join(df.columns.tolist())}")
-        
+
         return df
-        
+
     except Exception as e:
         print_error(f"Failed to load file {file_path}: {str(e)}")
         return None
 
+
 def validate_loaded_dataframe(df, verbose: bool = False):
     """
     Validate that the loaded DataFrame has the required columns for IP analysis
-    
+
     Args:
         df: pandas DataFrame to validate
         verbose: Whether to show detailed output
-    
+
     Returns:
         bool: True if valid, False otherwise
     """
-    required_columns = ['ipAddress', 'abuseConfidenceScore']
-    optional_columns = ['countryCode', 'isWhitelisted', 'isTor', 'isPublic', 'risk_level']
-    
+    required_columns = ["ipAddress", "abuseConfidenceScore"]
+    optional_columns = [
+        "countryCode",
+        "isWhitelisted",
+        "isTor",
+        "isPublic",
+        "risk_level",
+    ]
+
     missing_required = [col for col in required_columns if col not in df.columns]
-    
+
     if missing_required:
         print_error(f"Missing required columns: {', '.join(missing_required)}")
         print_info(f"Available columns: {', '.join(df.columns.tolist())}")
         return False
-    
+
     missing_optional = [col for col in optional_columns if col not in df.columns]
-    
+
     if verbose:
         print_success("Required columns found")
         if missing_optional:
             print_warning(f"Missing optional columns: {', '.join(missing_optional)}")
             print_info("Missing columns will be handled automatically")
-    
+
     return True
+
 
 ###########################################################################
 ## IP EXTRACTION ##########################################################
@@ -900,17 +949,36 @@ def validate_loaded_dataframe(df, verbose: bool = False):
 
 # Regex matching IPv4 and IPv6 addresses
 IP_REGEX = re.compile(
-    r'(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(?![\d.])'
-    r'|(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}'
-    r'|(?:[0-9a-fA-F]{1,4}:){1,7}:'
-    r'|::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}'
+    r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(?![\d.])"
+    r"|(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}"
+    r"|(?:[0-9a-fA-F]{1,4}:){1,7}:"
+    r"|::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}"
 )
 
 # Private/loopback ranges to exclude from log analysis
-PRIVATE_IP_PREFIXES = ('10.', '172.16.', '172.17.', '172.18.', '172.19.',
-                       '172.20.', '172.21.', '172.22.', '172.23.', '172.24.',
-                       '172.25.', '172.26.', '172.27.', '172.28.', '172.29.',
-                       '172.30.', '172.31.', '192.168.', '127.', '0.', '169.254.')
+PRIVATE_IP_PREFIXES = (
+    "10.",
+    "172.16.",
+    "172.17.",
+    "172.18.",
+    "172.19.",
+    "172.20.",
+    "172.21.",
+    "172.22.",
+    "172.23.",
+    "172.24.",
+    "172.25.",
+    "172.26.",
+    "172.27.",
+    "172.28.",
+    "172.29.",
+    "172.30.",
+    "172.31.",
+    "192.168.",
+    "127.",
+    "0.",
+    "169.254.",
+)
 
 
 def extract_ips_from_text(text):
@@ -1078,85 +1146,104 @@ def process_ip_addresses(args, api_key):
 
     return display_df
 
+
 def process_loaded_data(args):
     """
     Process data loaded from file with the same filtering capabilities as check command
-    
+
     Args:
         args: Command line arguments from argparse
-    
+
     Returns:
         pandas.DataFrame or None
     """
     # Load the data
     df = load_dataframe_from_file(args.source, args.format, verbose=args.verbose)
-    
+
     if df is None:
         return None
-    
+
     # Validate the DataFrame structure
     if not validate_loaded_dataframe(df, verbose=args.verbose):
         return None
-    
+
     # Add missing columns with default values if needed
-    if 'countryCode' not in df.columns:
-        df['countryCode'] = 'Unknown'
+    if "countryCode" not in df.columns:
+        df["countryCode"] = "Unknown"
         if args.verbose:
-            print_info("Added missing 'countryCode' column with default value 'Unknown'")
-    
-    if 'isWhitelisted' not in df.columns:
-        df['isWhitelisted'] = False
+            print_info(
+                "Added missing 'countryCode' column with default value 'Unknown'"
+            )
+
+    if "isWhitelisted" not in df.columns:
+        df["isWhitelisted"] = False
         if args.verbose:
             print_info("Added missing 'isWhitelisted' column with default value False")
-    
-    if 'isTor' not in df.columns:
-        df['isTor'] = False
+
+    if "isTor" not in df.columns:
+        df["isTor"] = False
         if args.verbose:
             print_info("Added missing 'isTor' column with default value False")
-    
-    if 'isPublic' not in df.columns:
-        df['isPublic'] = True
+
+    if "isPublic" not in df.columns:
+        df["isPublic"] = True
         if args.verbose:
             print_info("Added missing 'isPublic' column with default value True")
-    
+
     # Apply all filters (same as check command)
     filtered_df = apply_all_filters(df, args)
-    
+
     if filtered_df.empty:
         print_error("No IP addresses match the specified criteria")
         return None
-    
+
     # Display results
-    columns_order = ['ipAddress', 'risk_level', 'abuseConfidenceScore', 'countryCode', 
-                    'isWhitelisted', 'isTor', 'isPublic'] + \
-                   [col for col in filtered_df.columns if col not in 
-                    ['ipAddress', 'risk_level', 'abuseConfidenceScore', 'countryCode', 
-                     'isWhitelisted', 'isTor', 'isPublic']]
-    
+    columns_order = [
+        "ipAddress",
+        "risk_level",
+        "abuseConfidenceScore",
+        "countryCode",
+        "isWhitelisted",
+        "isTor",
+        "isPublic",
+    ] + [
+        col
+        for col in filtered_df.columns
+        if col
+        not in [
+            "ipAddress",
+            "risk_level",
+            "abuseConfidenceScore",
+            "countryCode",
+            "isWhitelisted",
+            "isTor",
+            "isPublic",
+        ]
+    ]
+
     # Only include columns that exist in the DataFrame
     available_columns = [col for col in columns_order if col in filtered_df.columns]
     display_df = filtered_df[available_columns]
-    
- 
-    
+
     # Export if requested
     if args.export:
         if args.verbose:
             print_info(f"Exporting to formats: {', '.join(args.export)}")
-        
+
         # Generate base filename with timestamp
-        timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
         source_name = Path(args.source).stem
         base_filename = f"{source_name}_filtered_{timestamp}"
-        
+
         export_dataframe(
-            df=display_df, 
-            formats=args.export, 
+            df=display_df,
+            formats=args.export,
             base_filename=base_filename,
-            verbose=args.verbose
+            verbose=args.verbose,
         )
-    
+
     return display_df
+
 
 def process_analyze(args, api_key):
     """
@@ -1182,6 +1269,8 @@ def process_analyze(args, api_key):
 
 
 def main():
+    print_banner()
+
     parser = create_parser()
 
     # If no arguments provided, show help

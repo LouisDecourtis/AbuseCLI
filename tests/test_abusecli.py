@@ -21,16 +21,42 @@ from abusecli import (
 @pytest.fixture
 def sample_df():
     """Sample DataFrame mimicking AbuseIPDB API response"""
-    return pd.DataFrame([
-        {"ipAddress": "1.2.3.4", "abuseConfidenceScore": 95, "countryCode": "CN",
-         "isWhitelisted": False, "isTor": True, "isPublic": True},
-        {"ipAddress": "8.8.8.8", "abuseConfidenceScore": 0, "countryCode": "US",
-         "isWhitelisted": True, "isTor": False, "isPublic": True},
-        {"ipAddress": "5.5.5.5", "abuseConfidenceScore": 65, "countryCode": "RU",
-         "isWhitelisted": False, "isTor": False, "isPublic": True},
-        {"ipAddress": "10.0.0.1", "abuseConfidenceScore": 35, "countryCode": "FR",
-         "isWhitelisted": False, "isTor": False, "isPublic": False},
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "ipAddress": "1.2.3.4",
+                "abuseConfidenceScore": 95,
+                "countryCode": "CN",
+                "isWhitelisted": False,
+                "isTor": True,
+                "isPublic": True,
+            },
+            {
+                "ipAddress": "8.8.8.8",
+                "abuseConfidenceScore": 0,
+                "countryCode": "US",
+                "isWhitelisted": True,
+                "isTor": False,
+                "isPublic": True,
+            },
+            {
+                "ipAddress": "5.5.5.5",
+                "abuseConfidenceScore": 65,
+                "countryCode": "RU",
+                "isWhitelisted": False,
+                "isTor": False,
+                "isPublic": True,
+            },
+            {
+                "ipAddress": "10.0.0.1",
+                "abuseConfidenceScore": 35,
+                "countryCode": "FR",
+                "isWhitelisted": False,
+                "isTor": False,
+                "isPublic": False,
+            },
+        ]
+    )
 
 
 # ── IP Extraction ────────────────────────────────────────────────────
@@ -91,20 +117,32 @@ class TestIPExtraction:
 
 
 class TestPrivateIPPrefixes:
-    @pytest.mark.parametrize("ip", [
-        "10.0.0.1", "10.255.255.255",
-        "172.16.0.1", "172.31.255.255",
-        "192.168.0.1", "192.168.255.255",
-        "127.0.0.1",
-        "0.0.0.0",
-        "169.254.1.1",
-    ])
+    @pytest.mark.parametrize(
+        "ip",
+        [
+            "10.0.0.1",
+            "10.255.255.255",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.0.1",
+            "192.168.255.255",
+            "127.0.0.1",
+            "0.0.0.0",
+            "169.254.1.1",
+        ],
+    )
     def test_private_ips_detected(self, ip):
         assert ip.startswith(PRIVATE_IP_PREFIXES)
 
-    @pytest.mark.parametrize("ip", [
-        "8.8.8.8", "1.1.1.1", "185.220.101.34", "45.33.32.156",
-    ])
+    @pytest.mark.parametrize(
+        "ip",
+        [
+            "8.8.8.8",
+            "1.1.1.1",
+            "185.220.101.34",
+            "45.33.32.156",
+        ],
+    )
     def test_public_ips_not_filtered(self, ip):
         assert not ip.startswith(PRIVATE_IP_PREFIXES)
 
@@ -116,7 +154,9 @@ class TestRiskLevel:
     def test_add_risk_level_column(self, sample_df):
         df = add_risk_level_column(sample_df)
         assert "risk_level" in df.columns
-        assert df.loc[df["ipAddress"] == "1.2.3.4", "risk_level"].values[0] == "critical"
+        assert (
+            df.loc[df["ipAddress"] == "1.2.3.4", "risk_level"].values[0] == "critical"
+        )
         assert df.loc[df["ipAddress"] == "8.8.8.8", "risk_level"].values[0] == "low"
         assert df.loc[df["ipAddress"] == "5.5.5.5", "risk_level"].values[0] == "high"
         assert df.loc[df["ipAddress"] == "10.0.0.1", "risk_level"].values[0] == "medium"
@@ -125,7 +165,16 @@ class TestRiskLevel:
         df = pd.DataFrame({"abuseConfidenceScore": [0, 24, 25, 49, 50, 74, 75, 100]})
         df = add_risk_level_column(df)
         levels = df["risk_level"].tolist()
-        assert levels == ["low", "low", "medium", "medium", "high", "high", "critical", "critical"]
+        assert levels == [
+            "low",
+            "low",
+            "medium",
+            "medium",
+            "high",
+            "high",
+            "critical",
+            "critical",
+        ]
 
 
 # ── Filters ───────────────────────────────────────────────────────────
@@ -200,6 +249,14 @@ class TestFilters:
         assert len(result) == len(sample_df)
 
     def test_filter_empty_df(self):
-        df = pd.DataFrame(columns=["abuseConfidenceScore", "countryCode", "isTor", "isPublic", "isWhitelisted"])
+        df = pd.DataFrame(
+            columns=[
+                "abuseConfidenceScore",
+                "countryCode",
+                "isTor",
+                "isPublic",
+                "isWhitelisted",
+            ]
+        )
         result = filter_by_score(df, 50)
         assert result.empty
