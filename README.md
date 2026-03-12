@@ -1,25 +1,33 @@
 # AbuseCLI
 
-A powerful CLI tool to query [AbuseIPDB](https://www.abuseipdb.com/), analyze log files, and manipulate IP-based Indicators of Compromise (IoCs).
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![CI/CD](https://github.com/LouisDecourtis/AbuseCLI/actions/workflows/ci.yml/badge.svg)](https://github.com/LouisDecourtis/AbuseCLI/actions)
+
+A powerful CLI tool to query [AbuseIPDB](https://www.abuseipdb.com/), analyze log files, report abusive IPs, and manipulate IP-based Indicators of Compromise (IoCs) — with Shodan enrichment and async bulk checking.
 
 ## Features
 
 - **Check IPs** — Query AbuseIPDB for abuse confidence scores on one or more IP addresses
 - **Analyze logs** — Automatically extract and check IPs from log files (auth.log, access.log, syslog, etc.)
+- **Report abuse** — Report abusive IPs directly to AbuseIPDB with category and comment
+- **Shodan enrichment** — Enrich results with open ports, CVEs, and hostnames via Shodan InternetDB (free, no API key)
+- **Async bulk checking** — Parallel API requests for fast bulk IP analysis
 - **Load & filter** — Reload previously exported results and apply filters without re-querying the API
 - **Rich terminal output** — Color-coded tables, score bars, and summary panels
 - **Flexible input** — IPs from arguments, files, or stdin pipes
 - **Multiple export formats** — CSV, JSON, Excel, HTML, Parquet
+- **Local cache** — SQLite cache to avoid redundant API calls (4h TTL)
 - **Advanced filtering** — By risk level, score, country, TOR status, private/public, whitelist
 
 ## Installation
 
 ```bash
-git clone https://github.com/tristanqtn/AbuseCLI.git
+git clone https://github.com/LouisDecourtis/AbuseCLI.git
 cd AbuseCLI
 python3 -m venv .venv
 source .venv/bin/activate
-pip install requests pandas tqdm python-dotenv rich openpyxl
+pip install -r requirements.txt
 ```
 
 ## Configuration
@@ -51,7 +59,24 @@ python3 abusecli.py check --ips 1.1.1.1 8.8.8.8 --risk-level critical --score 75
 
 # Check and export results
 python3 abusecli.py check --ips 1.1.1.1 --export csv json
+
+# Check with Shodan enrichment (open ports, CVEs, hostnames)
+python3 abusecli.py check --ips 1.1.1.1 8.8.8.8 --enrich
 ```
+
+### Report abusive IPs
+
+Report an IP address directly to AbuseIPDB with abuse categories and an optional comment.
+
+```bash
+# Report an IP for SSH brute force
+python3 abusecli.py report --ip 1.2.3.4 --categories 18,22 --comment "SSH brute force"
+
+# Report with just categories
+python3 abusecli.py report --ip 5.6.7.8 --categories 14
+```
+
+See [AbuseIPDB categories](https://www.abuseipdb.com/categories) for the full list of category IDs.
 
 ### Analyze log files
 
@@ -93,6 +118,7 @@ All commands (`check`, `analyze`, `load`) support the same filters:
 | `--is-not-tor` | Exclude TOR exit nodes |
 | `--remove-private` | Keep only public IP addresses |
 | `--remove-whitelisted` | Remove whitelisted IP addresses |
+| `--enrich` | Enrich with Shodan InternetDB (ports, CVEs, hostnames) |
 
 ## Risk levels
 

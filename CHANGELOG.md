@@ -2,6 +2,24 @@
 
 Toutes les modifications notables apportees au projet depuis le fork sont documentees ici.
 
+## [1.1.0] - 2026-03-12
+
+### Fonctionnalites
+
+- **Commande `report`** : nouvelle commande pour signaler une IP abusive directement a AbuseIPDB (`abusecli.py report --ip X.X.X.X --categories 18,22 --comment "SSH brute force"`). Affiche un tableau de confirmation avec le score mis a jour.
+- **Enrichissement Shodan InternetDB** (`--enrich`) : option disponible sur `check`, `analyze`, et `load`. Ajoute les ports ouverts, CVEs connues, et hostnames pour chaque IP via l'API gratuite Shodan InternetDB (aucune cle API requise).
+- **Requetes asynchrones** : les verifications bulk (2+ IPs) utilisent maintenant `asyncio` + `aiohttp` pour des requetes paralleles, avec un semaphore de 10 requetes simultanees et gestion automatique du rate limiting (429 + Retry-After).
+
+### Dependances
+
+- Ajout de `aiohttp>=3.9.0,<4.0.0` dans `requirements.txt`.
+
+### Securite
+
+- Ajout de `SECURITY.md` avec politique de divulgation responsable.
+
+---
+
 ## [1.0.0] - 2026-03-11
 
 ### Bugfixes
