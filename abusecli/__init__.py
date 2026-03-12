@@ -1,9 +1,8 @@
-#!/usr/bin/env python3
-"""Wrapper for backwards compatibility. Use `python -m abusecli` instead."""
+"""AbuseCLI — AbuseIPDB CLI Tool"""
 
-from abusecli.main import main
+__version__ = "1.1.0"
 
-# Re-export public API for tests and external usage
+# Re-export public API for backwards compatibility (tests import from `abusecli`)
 from abusecli.constants import PRIVATE_IP_PREFIXES  # noqa: F401
 from abusecli.extraction import extract_ips_from_text, extract_ips_from_file  # noqa: F401
 from abusecli.filters import (  # noqa: F401
@@ -15,6 +14,3 @@ from abusecli.filters import (  # noqa: F401
     filter_remove_private,
     filter_remove_whitelisted,
 )
-
-if __name__ == "__main__":
-    main()
