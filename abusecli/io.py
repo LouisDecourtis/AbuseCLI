@@ -30,7 +30,7 @@ def export_dataframe(df, formats, base_filename="ip_analysis", verbose=False):
                     index=False,
                     classes="table table-striped table-bordered",
                     table_id="ip-analysis-table",
-                    escape=False,
+                    escape=True,
                 )
             elif format_type == "parquet":
                 df.to_parquet(filename, index=False)

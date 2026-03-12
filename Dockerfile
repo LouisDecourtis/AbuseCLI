@@ -11,7 +11,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY abusecli.py .
+COPY abusecli/ ./abusecli/
 
 USER appuser
 
-ENTRYPOINT ["python", "abusecli.py"]
+ENTRYPOINT ["python", "-m", "abusecli"]

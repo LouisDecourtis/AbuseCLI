@@ -37,7 +37,7 @@ def main():
             print_error("\nOperation aborted by user...")
             return
         except Exception as e:
-            print_error(f"Error occured while loading API key: {e}")
+            print_error(f"Error occurred while loading API key: {e}")
             return
 
         if args.command == "quota":

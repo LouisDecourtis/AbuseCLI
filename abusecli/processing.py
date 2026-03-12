@@ -61,16 +61,18 @@ def process_ip_addresses(args, api_key):
             for ip in pbar:
                 try:
                     pbar.set_description(f"Checking {ip}")
-                    ip_data = check_ip_abuse(
+                    result = check_ip_abuse(
                         ip_address=ip,
                         api_key=api_key,
                         verbose=args.verbose,
                         cache_conn=cache_conn,
                         cache_ttl=args.cache_ttl,
-                    ).get("data")
+                    )
 
-                    if ip_data and "reports" in ip_data:
-                        del ip_data["reports"]
+                    if result and "data" in result:
+                        ip_data = result["data"]
+                        if "reports" in ip_data:
+                            del ip_data["reports"]
                         ip_array.append(ip_data)
                         success_count += 1
                     else:

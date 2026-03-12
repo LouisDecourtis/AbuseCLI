@@ -101,7 +101,7 @@ Examples:
         "--verbose",
         "-v",
         action="store_true",
-        help="Show detailed output, strongly recommanded for debugging.",
+        help="Show detailed output, strongly recommended for debugging.",
     )
 
     # LOAD command

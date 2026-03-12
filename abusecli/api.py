@@ -47,7 +47,7 @@ def check_ip_abuse(
 
         return result
     except requests.exceptions.RequestException as e:
-        print(f"Error querying {ip_address}: {e}")
+        print_error(f"Error querying {ip_address}: {e}")
         return None
 
 
