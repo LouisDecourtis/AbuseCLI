@@ -4,11 +4,13 @@ import re
 import sys
 import json
 import time
+import asyncio
 import sqlite3
 import getpass
 import argparse
 import requests
 
+import aiohttp
 import pandas as pd
 
 from tqdm import tqdm
@@ -23,13 +25,15 @@ from rich.text import Text
 console = Console()
 
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 ###########################################################################
 ## CONSTANTS ##############################################################
 ###########################################################################
 
 API_URL = "https://api.abuseipdb.com/api/v2/check"
+API_REPORT_URL = "https://api.abuseipdb.com/api/v2/report"
+SHODAN_INTERNETDB_URL = "https://internetdb.shodan.io"
 
 BANNER = """
 [bold red] █████╗ ██████╗ ██╗   ██╗███████╗███████╗ ██████╗██╗     ██╗
@@ -73,9 +77,11 @@ def create_parser():
         epilog="""
 Examples:
   abusecli.py check --ips 1.1.1.1 8.8.8.8
+  abusecli.py check --ips 1.1.1.1 8.8.8.8 --enrich
   abusecli.py check --file ips.txt
   cat ips.txt | abusecli.py check --ips -
   abusecli.py analyze /var/log/auth.log
+  abusecli.py report --ip 1.2.3.4 --categories 18,22 --comment "SSH brute force"
   """,
     )
 
@@ -319,6 +325,45 @@ Examples:
         help="Only clear entries older than duration (e.g. 7d, 12h, 30m)",
     )
 
+    # REPORT command
+    report_parser = subparsers.add_parser(
+        "report",
+        help="Report an abusive IP address to AbuseIPDB",
+    )
+    report_parser.add_argument(
+        "--ip",
+        required=True,
+        metavar="IP",
+        help="IP address to report",
+    )
+    report_parser.add_argument(
+        "--categories",
+        "-c",
+        required=True,
+        metavar="CAT",
+        help="Comma-separated abuse category IDs (e.g. 18,22). See https://www.abuseipdb.com/categories",
+    )
+    report_parser.add_argument(
+        "--comment",
+        "-m",
+        metavar="TEXT",
+        help="Description of the abusive activity",
+    )
+    report_parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show detailed output.",
+    )
+
+    # Add --enrich flag to check, analyze, and load commands
+    for sub_parser in [check_parser, analyze_parser, load_parser]:
+        sub_parser.add_argument(
+            "--enrich",
+            action="store_true",
+            help="Enrich results with Shodan InternetDB data (open ports, CVEs, hostnames). Free, no API key needed.",
+        )
+
     return parser
 
 
@@ -398,12 +443,18 @@ def display_results(df):
     table.add_column("TOR", justify="center")
     table.add_column("Public", justify="center")
 
+    has_enrichment = "open_ports" in df.columns
+    if has_enrichment:
+        table.add_column("Ports", style="cyan", max_width=30)
+        table.add_column("CVEs", style="red", max_width=40)
+        table.add_column("Hostnames", style="blue", max_width=30)
+
     for _, row in df.iterrows():
         risk = str(row.get("risk_level", "N/A"))
         risk_color = RISK_COLORS.get(risk, "white")
         score = int(row.get("abuseConfidenceScore", 0))
 
-        table.add_row(
+        row_data = [
             str(row.get("ipAddress", "N/A")),
             Text(risk.upper(), style=f"bold {risk_color}"),
             build_score_bar(score),
@@ -411,7 +462,18 @@ def display_results(df):
             "Yes" if row.get("isWhitelisted") else "No",
             Text("Yes", style="bold red") if row.get("isTor") else Text("No"),
             "Yes" if row.get("isPublic") else Text("No", style="dim"),
-        )
+        ]
+
+        if has_enrichment:
+            row_data.extend(
+                [
+                    str(row.get("open_ports", "-")),
+                    str(row.get("cves", "-")),
+                    str(row.get("hostnames", "-")),
+                ]
+            )
+
+        table.add_row(*row_data)
 
     console.print()
     console.print(table)
@@ -864,6 +926,193 @@ def check_ip_abuse(
     except requests.exceptions.RequestException as e:
         print(f"Error querying {ip_address}: {e}")
         return None
+
+
+###########################################################################
+## SHODAN INTERNETDB ENRICHMENT ###########################################
+###########################################################################
+
+
+async def fetch_shodan_ip(session, ip_address):
+    """Fetch enrichment data from Shodan InternetDB for a single IP"""
+    try:
+        async with session.get(
+            f"{SHODAN_INTERNETDB_URL}/{ip_address}",
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status == 200:
+                return ip_address, await resp.json()
+            return ip_address, None
+    except Exception:
+        return ip_address, None
+
+
+async def fetch_shodan_bulk(ip_list):
+    """Fetch Shodan InternetDB data for multiple IPs concurrently"""
+    async with aiohttp.ClientSession() as session:
+        tasks = [fetch_shodan_ip(session, ip) for ip in ip_list]
+        return dict(await asyncio.gather(*tasks))
+
+
+def enrich_dataframe_with_shodan(df, verbose=False):
+    """Enrich a DataFrame with Shodan InternetDB data (ports, CVEs, hostnames)"""
+    ip_list = df["ipAddress"].tolist()
+
+    if verbose:
+        print_info(f"Enriching {len(ip_list)} IPs with Shodan InternetDB...")
+
+    shodan_data = asyncio.run(fetch_shodan_bulk(ip_list))
+
+    ports_list = []
+    cves_list = []
+    hostnames_list = []
+
+    for ip in ip_list:
+        data = shodan_data.get(ip)
+        if data:
+            ports_list.append(", ".join(str(p) for p in data.get("ports", [])) or "-")
+            cves_list.append(", ".join(data.get("vulns", [])) or "-")
+            hostnames_list.append(", ".join(data.get("hostnames", [])) or "-")
+        else:
+            ports_list.append("-")
+            cves_list.append("-")
+            hostnames_list.append("-")
+
+    df = df.copy()
+    df["open_ports"] = ports_list
+    df["cves"] = cves_list
+    df["hostnames"] = hostnames_list
+
+    if verbose:
+        enriched_count = sum(1 for d in shodan_data.values() if d is not None)
+        print_success(
+            f"Shodan enrichment complete: {enriched_count}/{len(ip_list)} IPs enriched"
+        )
+
+    return df
+
+
+###########################################################################
+## REPORT IP ##############################################################
+###########################################################################
+
+
+def report_ip_abuse(ip_address, categories, comment, api_key, verbose=False):
+    """Report an abusive IP address to AbuseIPDB"""
+    headers = {"Key": api_key, "Accept": "application/json"}
+    data = {
+        "ip": ip_address,
+        "categories": categories,
+    }
+    if comment:
+        data["comment"] = comment
+
+    try:
+        response = requests.post(API_REPORT_URL, headers=headers, data=data, timeout=30)
+        result = handle_api_response(
+            response=response,
+            success_message=f"Successfully reported {ip_address} to AbuseIPDB",
+            verbose=verbose,
+        )
+
+        if result and "data" in result:
+            report_data = result["data"]
+            table = Table(
+                title="Report Submitted",
+                show_lines=True,
+                header_style="bold cyan",
+                border_style="dim",
+                expand=False,
+            )
+            table.add_column("Field", style="bold white")
+            table.add_column("Value", justify="left")
+
+            table.add_row("IP Address", str(report_data.get("ipAddress", ip_address)))
+            table.add_row(
+                "Abuse Score",
+                str(report_data.get("abuseConfidenceScore", "N/A")) + "%",
+            )
+            table.add_row("Categories", categories)
+            if comment:
+                table.add_row("Comment", comment)
+
+            console.print()
+            console.print(table)
+            console.print()
+            print_success(f"IP {ip_address} reported successfully")
+        return result
+    except requests.exceptions.RequestException as e:
+        print_error(f"Failed to report {ip_address}: {e}")
+        return None
+
+
+###########################################################################
+## ASYNC BULK CHECKING ####################################################
+###########################################################################
+
+
+async def check_ip_abuse_async(
+    session,
+    ip_address,
+    api_key,
+    semaphore,
+    cache_conn=None,
+    cache_ttl=DEFAULT_CACHE_TTL,
+):
+    """Check a single IP via AbuseIPDB asynchronously"""
+    # Try cache first
+    if cache_conn is not None:
+        cached = cache_get(cache_conn, ip_address, cache_ttl)
+        if cached is not None:
+            return ip_address, cached, True
+
+    headers = {"Key": api_key, "Accept": "application/json"}
+    params = {"ipAddress": ip_address, "maxAgeInDays": 90, "verbose": ""}
+
+    async with semaphore:
+        try:
+            async with session.get(
+                API_URL,
+                headers=headers,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    if cache_conn is not None:
+                        cache_set(cache_conn, ip_address, result)
+                    return ip_address, result, False
+                elif resp.status == 429:
+                    # Rate limited — wait and retry once
+                    retry_after = int(resp.headers.get("Retry-After", 2))
+                    await asyncio.sleep(retry_after)
+                    async with session.get(
+                        API_URL,
+                        headers=headers,
+                        params=params,
+                        timeout=aiohttp.ClientTimeout(total=30),
+                    ) as retry_resp:
+                        if retry_resp.status == 200:
+                            result = await retry_resp.json()
+                            if cache_conn is not None:
+                                cache_set(cache_conn, ip_address, result)
+                            return ip_address, result, False
+                return ip_address, None, False
+        except Exception:
+            return ip_address, None, False
+
+
+async def check_ips_bulk_async(
+    ip_list, api_key, cache_conn=None, cache_ttl=DEFAULT_CACHE_TTL, max_concurrent=10
+):
+    """Check multiple IPs concurrently with rate limiting"""
+    semaphore = asyncio.Semaphore(max_concurrent)
+    async with aiohttp.ClientSession() as session:
+        tasks = [
+            check_ip_abuse_async(session, ip, api_key, semaphore, cache_conn, cache_ttl)
+            for ip in ip_list
+        ]
+        return await asyncio.gather(*tasks)
 
 
 ###########################################################################
@@ -1387,36 +1636,51 @@ def process_ip_addresses(args, api_key):
     cache_hit_count = 0
     error_count = 0
 
-    with tqdm(ip_list, desc="Analyzing IPs", unit="IP", colour="green") as pbar:
-        for ip in pbar:
-            try:
-                pbar.set_description(f"Checking {ip}")
-                ip_data = check_ip_abuse(
-                    ip_address=ip,
-                    api_key=api_key,
-                    verbose=args.verbose,
-                    cache_conn=cache_conn,
-                    cache_ttl=args.cache_ttl,
-                ).get("data")
+    # Use async bulk checking for better performance
+    if len(ip_list) > 1:
+        print_info(f"Checking {len(ip_list)} IPs asynchronously...")
+        results = asyncio.run(
+            check_ips_bulk_async(
+                ip_list, api_key, cache_conn=cache_conn, cache_ttl=args.cache_ttl
+            )
+        )
 
-                if ip_data and "reports" in ip_data:
+        for ip, result, from_cache in results:
+            if from_cache:
+                cache_hit_count += 1
+            if result and "data" in result:
+                ip_data = result["data"]
+                if "reports" in ip_data:
                     del ip_data["reports"]
-                    ip_array.append(ip_data)
-                    success_count += 1
-                    status = "✓"
-                else:
-                    error_count += 1
-                    status = "✗"
-
-                pbar.set_postfix(
-                    {"✓": success_count, "✗": error_count, "Status": status}
-                )
-
-            except Exception as e:
+                ip_array.append(ip_data)
+                success_count += 1
+            else:
                 error_count += 1
-                if args.verbose:
-                    print_error(f"Error checking {ip}: {str(e)}")
-                pbar.set_postfix({"✓": success_count, "✗": error_count, "Status": "✗"})
+    else:
+        # Single IP — use synchronous call with progress
+        with tqdm(ip_list, desc="Analyzing IPs", unit="IP", colour="green") as pbar:
+            for ip in pbar:
+                try:
+                    pbar.set_description(f"Checking {ip}")
+                    ip_data = check_ip_abuse(
+                        ip_address=ip,
+                        api_key=api_key,
+                        verbose=args.verbose,
+                        cache_conn=cache_conn,
+                        cache_ttl=args.cache_ttl,
+                    ).get("data")
+
+                    if ip_data and "reports" in ip_data:
+                        del ip_data["reports"]
+                        ip_array.append(ip_data)
+                        success_count += 1
+                    else:
+                        error_count += 1
+
+                except Exception as e:
+                    error_count += 1
+                    if args.verbose:
+                        print_error(f"Error checking {ip}: {str(e)}")
 
     if cache_conn is not None:
         cache_conn.close()
@@ -1435,6 +1699,10 @@ def process_ip_addresses(args, api_key):
 
     df = pd.DataFrame(ip_array)
     filtered_df = apply_all_filters(df, args)
+
+    # Shodan enrichment if requested
+    if hasattr(args, "enrich") and args.enrich and not filtered_df.empty:
+        filtered_df = enrich_dataframe_with_shodan(filtered_df, verbose=args.verbose)
 
     if filtered_df.empty:
         print_error("No IP addresses match the specified criteria")
@@ -1535,6 +1803,10 @@ def process_loaded_data(args):
         print_error("No IP addresses match the specified criteria")
         return None
 
+    # Shodan enrichment if requested
+    if hasattr(args, "enrich") and args.enrich and not filtered_df.empty:
+        filtered_df = enrich_dataframe_with_shodan(filtered_df, verbose=args.verbose)
+
     # Display results
     columns_order = [
         "ipAddress",
@@ -1618,7 +1890,7 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command in ("check", "analyze", "quota"):
+    if args.command in ("check", "analyze", "quota", "report"):
         try:
             api_key = load_api_key(args=args)
         except KeyboardInterrupt:
@@ -1632,6 +1904,14 @@ def main():
             quota = fetch_quota(api_key)
             if quota:
                 display_quota(quota)
+        elif args.command == "report":
+            report_ip_abuse(
+                ip_address=args.ip,
+                categories=args.categories,
+                comment=args.comment,
+                api_key=api_key,
+                verbose=args.verbose,
+            )
         elif args.command == "check":
             ip_df = process_ip_addresses(args=args, api_key=api_key)
             if ip_df is not None and not ip_df.empty:
