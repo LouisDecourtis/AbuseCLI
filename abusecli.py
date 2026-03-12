@@ -660,7 +660,9 @@ def display_cache_stats():
     stats = cache_stats()
 
     if stats["entries"] == 0:
-        console.print(Panel("Cache is empty.", title="Cache Stats", border_style="cyan"))
+        console.print(
+            Panel("Cache is empty.", title="Cache Stats", border_style="cyan")
+        )
         return
 
     size_kb = stats["size_bytes"] / 1024
@@ -828,7 +830,11 @@ def validate_api_key(api_key):
 
 
 def check_ip_abuse(
-    ip_address, api_key, verbose: bool = False, cache_conn=None, cache_ttl=DEFAULT_CACHE_TTL
+    ip_address,
+    api_key,
+    verbose: bool = False,
+    cache_conn=None,
+    cache_ttl=DEFAULT_CACHE_TTL,
 ):
     """Check IP abuse score on AbuseIPDB, with optional cache"""
     # Try cache first
@@ -1643,7 +1649,9 @@ def main():
     elif args.command == "cache":
         if not hasattr(args, "cache_action") or args.cache_action is None:
             print_error("Please specify a cache action: stats or clear")
-            print_info("Usage: abusecli.py cache stats | abusecli.py cache clear [--older-than 7d]")
+            print_info(
+                "Usage: abusecli.py cache stats | abusecli.py cache clear [--older-than 7d]"
+            )
             return
 
         if args.cache_action == "stats":
@@ -1659,7 +1667,9 @@ def main():
                     return
             deleted = cache_clear(older_than)
             if older_than:
-                print_success(f"Cleared {deleted} cache entries older than {args.older_than}")
+                print_success(
+                    f"Cleared {deleted} cache entries older than {args.older_than}"
+                )
             else:
                 print_success(f"Cleared {deleted} cache entries")
 
