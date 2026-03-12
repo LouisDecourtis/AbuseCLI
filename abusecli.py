@@ -3,6 +3,8 @@ import os
 import re
 import sys
 import json
+import time
+import sqlite3
 import getpass
 import argparse
 import requests
@@ -40,6 +42,11 @@ BANNER = """
 """
 ENV_FILE = ".env"
 
+# Cache constants
+CACHE_DIR = os.path.join(str(Path.home()), ".abusecli")
+CACHE_DB = os.path.join(CACHE_DIR, "cache.db")
+DEFAULT_CACHE_TTL = 14400  # 4 hours in seconds
+
 # Risk level constants
 RISK_CRITICAL_MIN = 75
 RISK_HIGH_MIN = 50
@@ -74,6 +81,18 @@ Examples:
 
     # Global arguments (optional)
     parser.add_argument("--token", help="AbuseIP API Token")
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Bypass cache and force fresh API calls",
+    )
+    parser.add_argument(
+        "--cache-ttl",
+        type=int,
+        default=DEFAULT_CACHE_TTL,
+        metavar="SECONDS",
+        help=f"Cache time-to-live in seconds (default: {DEFAULT_CACHE_TTL} = 4h)",
+    )
 
     # Subparsers
     subparsers = parser.add_subparsers(
@@ -280,6 +299,24 @@ Examples:
         "-v",
         action="store_true",
         help="Show detailed output.",
+    )
+
+    # CACHE command
+    cache_parser = subparsers.add_parser(
+        "cache",
+        help="Manage the local response cache",
+    )
+    cache_sub = cache_parser.add_subparsers(
+        dest="cache_action",
+        title="Cache actions",
+        description="Available cache actions",
+    )
+    cache_sub.add_parser("stats", help="Show cache statistics")
+    cache_clear_parser = cache_sub.add_parser("clear", help="Clear the cache")
+    cache_clear_parser.add_argument(
+        "--older-than",
+        metavar="DURATION",
+        help="Only clear entries older than duration (e.g. 7d, 12h, 30m)",
     )
 
     return parser
@@ -532,6 +569,133 @@ def display_quota(quota):
 
 
 ###########################################################################
+## CACHE ##################################################################
+###########################################################################
+
+
+def init_cache_db():
+    """Initialize the cache database and return a connection"""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    conn = sqlite3.connect(CACHE_DB)
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS ip_cache (
+            ip_address TEXT PRIMARY KEY,
+            response_data TEXT NOT NULL,
+            cached_at REAL NOT NULL
+        )"""
+    )
+    conn.commit()
+    return conn
+
+
+def cache_get(conn, ip_address, ttl):
+    """Get a cached response if it exists and hasn't expired"""
+    row = conn.execute(
+        "SELECT response_data, cached_at FROM ip_cache WHERE ip_address = ?",
+        (ip_address,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    response_data, cached_at = row
+    if time.time() - cached_at > ttl:
+        return None
+
+    return json.loads(response_data)
+
+
+def cache_set(conn, ip_address, response_data):
+    """Store an API response in the cache"""
+    conn.execute(
+        "INSERT OR REPLACE INTO ip_cache (ip_address, response_data, cached_at) VALUES (?, ?, ?)",
+        (ip_address, json.dumps(response_data), time.time()),
+    )
+    conn.commit()
+
+
+def cache_stats():
+    """Return cache statistics"""
+    if not os.path.exists(CACHE_DB):
+        return {"entries": 0, "size_bytes": 0, "oldest": None, "newest": None}
+
+    conn = sqlite3.connect(CACHE_DB)
+    row = conn.execute(
+        "SELECT COUNT(*), MIN(cached_at), MAX(cached_at) FROM ip_cache"
+    ).fetchone()
+    conn.close()
+
+    size = os.path.getsize(CACHE_DB)
+    count, oldest, newest = row
+
+    return {
+        "entries": count,
+        "size_bytes": size,
+        "oldest": oldest,
+        "newest": newest,
+    }
+
+
+def cache_clear(older_than=None):
+    """Clear cache entries. If older_than is set (seconds), only purge old entries."""
+    if not os.path.exists(CACHE_DB):
+        return 0
+
+    conn = sqlite3.connect(CACHE_DB)
+    if older_than is not None:
+        cutoff = time.time() - older_than
+        deleted = conn.execute(
+            "DELETE FROM ip_cache WHERE cached_at < ?", (cutoff,)
+        ).rowcount
+    else:
+        deleted = conn.execute("DELETE FROM ip_cache").rowcount
+
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def display_cache_stats():
+    """Display cache statistics with a rich panel"""
+    stats = cache_stats()
+
+    if stats["entries"] == 0:
+        console.print(Panel("Cache is empty.", title="Cache Stats", border_style="cyan"))
+        return
+
+    size_kb = stats["size_bytes"] / 1024
+    oldest_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats["oldest"]))
+    newest_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats["newest"]))
+
+    lines = [
+        f"[bold]Entries:[/bold]    {stats['entries']}",
+        f"[bold]Size:[/bold]       {size_kb:.1f} KB",
+        f"[bold]Oldest:[/bold]     {oldest_str}",
+        f"[bold]Newest:[/bold]     {newest_str}",
+        f"[bold]Location:[/bold]   {CACHE_DB}",
+    ]
+
+    console.print()
+    console.print(
+        Panel("\n".join(lines), title="Cache Stats", border_style="cyan", expand=False)
+    )
+    console.print()
+
+
+def parse_duration(duration_str):
+    """Parse a duration string like '7d', '12h', '30m' into seconds"""
+    match = re.match(r"^(\d+)([dhm])$", duration_str)
+    if not match:
+        return None
+
+    value = int(match.group(1))
+    unit = match.group(2)
+
+    multipliers = {"d": 86400, "h": 3600, "m": 60}
+    return value * multipliers[unit]
+
+
+###########################################################################
 ## API RESPONSE HANDLING ##################################################
 ###########################################################################
 
@@ -663,18 +827,34 @@ def validate_api_key(api_key):
 ###########################################################################
 
 
-def check_ip_abuse(ip_address, api_key, verbose: bool = False):
-    """Check IP abuse score on AbuseIPDB"""
+def check_ip_abuse(
+    ip_address, api_key, verbose: bool = False, cache_conn=None, cache_ttl=DEFAULT_CACHE_TTL
+):
+    """Check IP abuse score on AbuseIPDB, with optional cache"""
+    # Try cache first
+    if cache_conn is not None:
+        cached = cache_get(cache_conn, ip_address, cache_ttl)
+        if cached is not None:
+            if verbose:
+                print_info(f"{ip_address} served from cache")
+            return cached
+
     headers = {"Key": api_key, "Accept": "application/json"}
     params = {"ipAddress": ip_address, "maxAgeInDays": 90, "verbose": ""}
 
     try:
         response = requests.get(API_URL, headers=headers, params=params, timeout=30)
-        return handle_api_response(
+        result = handle_api_response(
             response=response,
             success_message=f"{ip_address} successfully verified on AbuseIPDB",
             verbose=verbose,
         )
+
+        # Store in cache on success
+        if result is not None and cache_conn is not None:
+            cache_set(cache_conn, ip_address, result)
+
+        return result
     except requests.exceptions.RequestException as e:
         print(f"Error querying {ip_address}: {e}")
         return None
@@ -1191,8 +1371,14 @@ def process_ip_addresses(args, api_key):
         print_error("No IP addresses provided")
         return None
 
+    # Initialize cache unless disabled
+    cache_conn = None
+    if not args.no_cache:
+        cache_conn = init_cache_db()
+
     ip_array = []
     success_count = 0
+    cache_hit_count = 0
     error_count = 0
 
     with tqdm(ip_list, desc="Analyzing IPs", unit="IP", colour="green") as pbar:
@@ -1200,7 +1386,11 @@ def process_ip_addresses(args, api_key):
             try:
                 pbar.set_description(f"Checking {ip}")
                 ip_data = check_ip_abuse(
-                    ip_address=ip, api_key=api_key, verbose=args.verbose
+                    ip_address=ip,
+                    api_key=api_key,
+                    verbose=args.verbose,
+                    cache_conn=cache_conn,
+                    cache_ttl=args.cache_ttl,
                 ).get("data")
 
                 if ip_data and "reports" in ip_data:
@@ -1222,10 +1412,15 @@ def process_ip_addresses(args, api_key):
                     print_error(f"Error checking {ip}: {str(e)}")
                 pbar.set_postfix({"✓": success_count, "✗": error_count, "Status": "✗"})
 
+    if cache_conn is not None:
+        cache_conn.close()
+
     if args.verbose:
         print_info(
             f"API calls completed: {success_count} successful, {error_count} failed"
         )
+        if cache_hit_count > 0:
+            print_info(f"Cache hits: {cache_hit_count}/{len(ip_list)}")
 
     # Data processing
     if not ip_array:
@@ -1444,6 +1639,29 @@ def main():
         ip_df = process_loaded_data(args)
         if ip_df is not None and not ip_df.empty:
             display_results(ip_df)
+
+    elif args.command == "cache":
+        if not hasattr(args, "cache_action") or args.cache_action is None:
+            print_error("Please specify a cache action: stats or clear")
+            print_info("Usage: abusecli.py cache stats | abusecli.py cache clear [--older-than 7d]")
+            return
+
+        if args.cache_action == "stats":
+            display_cache_stats()
+        elif args.cache_action == "clear":
+            older_than = None
+            if args.older_than:
+                older_than = parse_duration(args.older_than)
+                if older_than is None:
+                    print_error(
+                        f"Invalid duration: {args.older_than}. Use format like 7d, 12h, 30m"
+                    )
+                    return
+            deleted = cache_clear(older_than)
+            if older_than:
+                print_success(f"Cleared {deleted} cache entries older than {args.older_than}")
+            else:
+                print_success(f"Cleared {deleted} cache entries")
 
     else:
         parser.print_help()
